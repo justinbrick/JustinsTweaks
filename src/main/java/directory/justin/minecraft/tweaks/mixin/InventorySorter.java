@@ -21,8 +21,8 @@ import java.util.*;
 
 @Mixin(ScreenHandler.class)
 public class InventorySorter {
-    private static HashMap<PlayerEntity, Long> playerClicks = new HashMap<PlayerEntity, Long>();
-    private static Comparator<ItemStack> stackComparator = Comparator.comparing(InventorySorter::getGroupValue)
+    private final static HashMap<PlayerEntity, Long> PLAYER_CLICKS = new HashMap<>();
+    private final static Comparator<ItemStack> STACK_COMPARATOR = Comparator.comparing(InventorySorter::getGroupValue)
             .thenComparing(InventorySorter::getRarityValue)
             .thenComparing(itemStack -> itemStack.getName().getString())
             .thenComparing(ItemStack::getDamage)
@@ -31,18 +31,12 @@ public class InventorySorter {
     private static int getRarityValue(ItemStack s) {
         if (s.isEmpty()) return 0;
         Rarity r = s.getRarity();
-        switch (r) {
-            case COMMON:
-                return 1;
-            case UNCOMMON:
-                return 2;
-            case RARE:
-                return 3;
-            case EPIC:
-                return 4;
-            default:
-                return 0;
-        }
+        return switch (r) {
+            case COMMON -> 1;
+            case UNCOMMON -> 2;
+            case RARE -> 3;
+            case EPIC -> 4;
+        };
     }
 
     // Can't use a switch statement here, fun!
@@ -76,17 +70,14 @@ public class InventorySorter {
             size = 27;
             starting += 4;
         }
-        System.out.println(starting);
-        System.out.println(size);
-        List<ItemStack> toSort = new ArrayList<ItemStack>();
+        List<ItemStack> toSort = new ArrayList<>();
         for (int i = 0; i < size; ++i) {
             if (!handler.getSlot(starting+i).getStack().isEmpty())
                 toSort.add(firstInventory.removeStack(handler.getSlot(starting+i).getIndex()));
         }
-        toSort.sort(stackComparator);
+        toSort.sort(STACK_COMPARATOR);
         int sortSize = toSort.size();
         for (int i = 0; i < size; ++i) {
-            if (i < sortSize) System.out.println(toSort.get(sortSize-i-1));
             handler.getSlot(starting+i).insertStack(i < sortSize ? toSort.get(sortSize-i-1) : ItemStack.EMPTY);
         }
         handler.syncState();
@@ -95,18 +86,17 @@ public class InventorySorter {
 
     @Inject(method = "internalOnSlotClick(IILnet/minecraft/screen/slot/SlotActionType;Lnet/minecraft/entity/player/PlayerEntity;)V", at = @At("HEAD"))
     private void slotClicked(int slotIndex, int button, SlotActionType actionType, PlayerEntity player, CallbackInfo callbackInfo) {
-        System.out.println(String.format("Clicked at slot index %d", slotIndex));
         ScreenHandler currentHandler = player.currentScreenHandler;
         if (slotIndex != -999 || button != 0) return;
-        if (!playerClicks.containsKey(player)) {
+        if (!PLAYER_CLICKS.containsKey(player)) {
             System.err.println("Could not find a player associated with the one currently clicking in inventory!");
             return;
         }
-        long lastTime = playerClicks.get(player);
+        long lastTime = PLAYER_CLICKS.get(player);
         long timeNow = System.currentTimeMillis();
-        playerClicks.put(player, timeNow);
+        PLAYER_CLICKS.put(player, timeNow);
         if (timeNow - lastTime > 1000) return;
-        playerClicks.put(player, timeNow - 1000);
+        PLAYER_CLICKS.put(player, timeNow - 1000);
         // Now we sort.
         sortInventory(currentHandler);
     }
@@ -118,12 +108,12 @@ public class InventorySorter {
 
     private static void onPlayerJoined(ServerPlayNetworkHandler handler, PacketSender sender, MinecraftServer server) {
         PlayerEntity p = handler.player;
-        playerClicks.put(p, System.currentTimeMillis());
+        PLAYER_CLICKS.put(p, System.currentTimeMillis());
     }
 
     private static void onPlayerLeft(ServerPlayNetworkHandler handler, MinecraftServer server) {
         PlayerEntity p = handler.player;
-        if (playerClicks.containsKey(p)) playerClicks.remove(p);
+        PLAYER_CLICKS.remove(p);
     }
 }
 
