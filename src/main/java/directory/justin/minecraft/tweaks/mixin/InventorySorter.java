@@ -94,7 +94,7 @@ public class InventorySorter {
     @Inject(method = "internalOnSlotClick(IILnet/minecraft/screen/slot/SlotActionType;Lnet/minecraft/entity/player/PlayerEntity;)V", at = @At("HEAD"))
     private void slotClicked(int slotIndex, int button, SlotActionType actionType, PlayerEntity player, CallbackInfo callbackInfo) {
         ScreenHandler currentHandler = player.currentScreenHandler;
-        if (slotIndex != -999 || button != 0) return;
+        if (slotIndex != -999 || button != 0 || !currentHandler.getCursorStack().isEmpty()) return;
         if (!PLAYER_CLICKS.containsKey(player)) {
             System.err.println("Could not find a player associated with the one currently clicking in inventory!");
             return;
@@ -102,8 +102,8 @@ public class InventorySorter {
         long lastTime = PLAYER_CLICKS.get(player);
         long timeNow = System.currentTimeMillis();
         PLAYER_CLICKS.put(player, timeNow);
-        if (timeNow - lastTime > 1000) return;
-        PLAYER_CLICKS.put(player, timeNow - 1000);
+        if (timeNow - lastTime > 500) return;
+        PLAYER_CLICKS.put(player, timeNow - 500);
         // Now we sort.
         sortInventory(currentHandler);
     }
