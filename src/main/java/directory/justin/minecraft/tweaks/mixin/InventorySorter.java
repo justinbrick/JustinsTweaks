@@ -3,10 +3,14 @@ package directory.justin.minecraft.tweaks.mixin;
 import net.fabricmc.fabric.api.networking.v1.PacketSender;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.inventory.CraftingInventory;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemGroup;
 import net.minecraft.item.ItemStack;
+import net.minecraft.screen.CraftingScreenHandler;
 import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.MinecraftServer;
@@ -68,7 +72,10 @@ public class InventorySorter {
         if (firstInventory == null) return;
         if (size == 41) {
             size = 27;
+        }
+        if (firstInventory instanceof PlayerInventory) {
             starting += 4;
+            System.out.println("Found the handler that is CraftingScreen");
         }
         List<ItemStack> toSort = new ArrayList<>();
         for (int i = 0; i < size; ++i) {
