@@ -9,6 +9,7 @@ import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemGroup;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.CraftingScreenHandler;
+import net.minecraft.screen.PlayerScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.screen.slot.Slot;
@@ -61,7 +62,7 @@ public class InventorySorter {
         Inventory firstInventory = null;
         for (int i = 0; i < size; ++i) {
             Slot s = handler.slots.get(i);
-            if (s.inventory.size() > 5) { // Bigger than brewing stand
+            if (s.inventory.size() > 10) { // Bigger than crafting table
                 firstInventory = s.inventory;
                 starting = i;
                 size = firstInventory.size();
@@ -73,9 +74,8 @@ public class InventorySorter {
         if (size == 41) {
             size = 27;
         }
-        if (firstInventory instanceof PlayerInventory) {
+        if (handler instanceof PlayerScreenHandler) {
             starting += 4;
-            System.out.println("Found the handler that is CraftingScreen");
         }
         List<ItemStack> toSort = new ArrayList<>();
         for (int i = 0; i < size; ++i) {
