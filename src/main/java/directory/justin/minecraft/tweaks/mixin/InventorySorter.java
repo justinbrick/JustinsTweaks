@@ -18,13 +18,12 @@ public class InventorySorter  {
 
         ScreenHandler currentHandler = player.currentScreenHandler;
         if (!SortUtility.PLAYER_SHOULD_SORT.get(player)) {
-            TweaksMod.LOGGER.info("Did not sort because player was set to not sort in the database!");
             return;
 
         }
         if (slotIndex != -999 || button != 0 || !currentHandler.getCursorStack().isEmpty()) return;
         if (!SortUtility.PLAYER_CLICKS.containsKey(player)) {
-            System.err.println("Could not find a player associated with the one currently clicking in inventory!");
+            TweaksMod.LOGGER.error("Could not find a player associated with the one currently clicking in inventory!");
             return;
         }
         long lastTime = SortUtility.PLAYER_CLICKS.get(player);
