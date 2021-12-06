@@ -33,6 +33,7 @@ public class TweaksDatabase {
         }
     }
 
+    // TODO: It wouldn't hurt to make this a better way, but there are only like 4 value types for SQL so :shrug:
     public void createPropertyInt(String name, int defaultValue) {
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + path)) {
             try (var statement = conn.prepareStatement(String.format(
@@ -53,7 +54,7 @@ public class TweaksDatabase {
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + path)) {
             String id = p.getUuidAsString();
             try (var statement = conn.prepareStatement(String.format(
-                    "SELECT 1 FROM %s WHERE key = '%s'", property, id
+                    "SELECT * FROM %s WHERE key = '%s';", property, id
             ))) {
                 var set = statement.executeQuery();
                 if (set.next())
@@ -71,7 +72,7 @@ public class TweaksDatabase {
     public void setDataInt(ServerPlayerEntity p, String property, int value) {
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + path)) {
             try (var statement = conn.prepareStatement(String.format(
-                    "INSERT INTO %S (table, data) VALUES (%s, %d)", property, p.getUuidAsString(), value
+                    "INSERT INTO %s (key, data) VALUES ('%s', %d) ON CONFLICT(key) DO UPDATE SET data = %s;", property, p.getUuidAsString(), value, value
             ))) {
                 statement.execute();
             }

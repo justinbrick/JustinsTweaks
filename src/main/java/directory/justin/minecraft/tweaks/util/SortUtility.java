@@ -1,4 +1,4 @@
-package directory.justin.minecraft.tweaks.mixin;
+package directory.justin.minecraft.tweaks.util;
 
 import directory.justin.minecraft.tweaks.TweaksMod;
 import net.fabricmc.fabric.api.command.v1.CommandRegistrationCallback;
@@ -23,30 +23,32 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 
-public class SortHandler {
+public class SortUtility {
     public final static HashMap<PlayerEntity, Long> PLAYER_CLICKS = new HashMap<>();
     public final static HashMap<PlayerEntity, Boolean> PLAYER_SHOULD_SORT = new HashMap<>();
-    public final static Comparator<ItemStack> STACK_COMPARATOR = Comparator.comparing(SortHandler::getGroupValue)
-            .thenComparing(SortHandler::getRarityValue)
+    private final static Comparator<ItemStack> STACK_COMPARATOR = Comparator.comparing(SortUtility::getGroupValue)
+            .thenComparing(SortUtility::getRarityValue)
             .thenComparing(itemStack -> itemStack.getName().getString())
             .thenComparing(ItemStack::getDamage)
             .thenComparing(ItemStack::getCount);
 
-    public SortHandler() {
-        ServerPlayConnectionEvents.JOIN.register(SortHandler::onPlayerJoined);
-        ServerPlayConnectionEvents.DISCONNECT.register(SortHandler::onPlayerLeft);
-        CommandRegistrationCallback.EVENT.register(((dispatcher, dedicated) -> dispatcher.register(CommandManager.literal("toggle_sort").executes(context -> {
-            var source = context.getSource();
-            if (!(source.getEntity() instanceof ServerPlayerEntity p)) {
-                source.sendError(Text.of("You must be a player to use this command, you silly goober."));
-                return -1;
-            }
-            boolean shouldSort = !PLAYER_SHOULD_SORT.get(p);
-            TweaksMod.CONFIG.setDataInt(p, "bShouldSort", shouldSort ? 1 : 0);
-            PLAYER_SHOULD_SORT.put(p, shouldSort);
-            source.sendFeedback(Text.of(String.format("%s sorting!", shouldSort ? "Enabled" : "Disabled")), false);
-            return 1;
-        }))));
+    public SortUtility() {
+        ServerPlayConnectionEvents.JOIN.register(SortUtility::onPlayerJoined);
+        ServerPlayConnectionEvents.DISCONNECT.register(SortUtility::onPlayerLeft);
+        CommandRegistrationCallback.EVENT.register(((dispatcher, dedicated) -> {
+            dispatcher.register(CommandManager.literal("toggle_sort").executes(context -> {
+                var source = context.getSource();
+                if (!(source.getEntity() instanceof ServerPlayerEntity p)) {
+                    source.sendError(Text.of("You must be a player to use this command, you silly goober."));
+                    return -1;
+                }
+                boolean shouldSort = !PLAYER_SHOULD_SORT.get(p);
+                TweaksMod.CONFIG.setDataInt(p, "bShouldSort", shouldSort ? 1 : 0);
+                PLAYER_SHOULD_SORT.put(p, shouldSort);
+                source.sendFeedback(Text.of(String.format("%s sorting!", shouldSort ? "Enabled" : "Disabled")), false);
+                return 1;
+            }));
+        }));
     }
 
     private static int getRarityValue(ItemStack s) {
