@@ -1,123 +1,165 @@
 package directory.justin.minecraft.tweaks.util;
 
-import directory.justin.minecraft.tweaks.TweaksMod;
-import net.fabricmc.fabric.api.command.v1.CommandRegistrationCallback;
-import net.fabricmc.fabric.api.networking.v1.PacketSender;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemGroup;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.PlayerScreenHandler;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.CommandManager;
-import net.minecraft.server.network.ServerPlayNetworkHandler;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.text.Text;
-import net.minecraft.util.Rarity;
+import io.papermc.paper.datacomponent.DataComponentTypes;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.Material;
+import org.bukkit.Tag;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryType;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.CreativeCategory;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.ItemType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.*;
 
-public class SortUtility {
-    public final static HashMap<PlayerEntity, Long> PLAYER_CLICKS = new HashMap<>();
-    public final static HashMap<PlayerEntity, Boolean> PLAYER_SHOULD_SORT = new HashMap<>();
+@SuppressWarnings("UnstableApiUsage")
+public class SortUtility implements Listener {
+    private static final int SORT_DELAY = 1000;
+    private static final int SORT_THRESHOLD = 250;
+    /// a mapping of the player UUID, and the last time a player had sorted.
+    /// typically used to prevent over-sorting
+    private static final HashMap<UUID, Instant> SORT_DEBOUNCE = new HashMap<>();
+    /// a mapping of the player UUID, and the last time a sort request had been triggered.
+    /// used to determine when to sort.
+    private static final HashMap<UUID, Instant> LAST_SORT_EVENTS = new HashMap<>();
+    private static final Logger LOGGER = LoggerFactory.getLogger(SortUtility.class);
+    private static final PlainTextComponentSerializer PLAIN_TEXT_COMPONENT_SERIALIZER = PlainTextComponentSerializer.plainText();
     private final static Comparator<ItemStack> STACK_COMPARATOR = Comparator.comparing(SortUtility::getGroupValue)
-            .thenComparing(SortUtility::getRarityValue)
-            .thenComparing(itemStack -> itemStack.getName().getString())
-            .thenComparing(ItemStack::getDamage)
-            .thenComparing(ItemStack::getCount);
+            .thenComparing(stack -> Optional.ofNullable(stack)
+                    .map(s -> s.getData(DataComponentTypes.ITEM_NAME))
+                    .map(PLAIN_TEXT_COMPONENT_SERIALIZER::serialize)
+                    .orElse("\uFFFF")
+            )
+            .thenComparing(stack -> Optional.ofNullable(stack)
+                    .map(s -> s.getData(DataComponentTypes.DAMAGE))
+                    .orElse(0)
+            )
+            .thenComparing(stack -> Optional.ofNullable(stack).map(ItemStack::getAmount).orElse(-1));
 
-    public SortUtility() {
-        ServerPlayConnectionEvents.JOIN.register(SortUtility::onPlayerJoined);
-        ServerPlayConnectionEvents.DISCONNECT.register(SortUtility::onPlayerLeft);
-        CommandRegistrationCallback.EVENT.register(((dispatcher, dedicated) -> {
-            dispatcher.register(CommandManager.literal("toggle_sort").executes(context -> {
-                var source = context.getSource();
-                if (!(source.getEntity() instanceof ServerPlayerEntity p)) {
-                    source.sendError(Text.of("You must be a player to use this command, you silly goober."));
-                    return -1;
+
+    @EventHandler
+    private static void onPlayerJoined(PlayerJoinEvent event) {
+        SORT_DEBOUNCE.put(event.getPlayer().getUniqueId(), Instant.now());
+        LAST_SORT_EVENTS.put(event.getPlayer().getUniqueId(), Instant.now());
+    }
+
+    @EventHandler
+    private static void onPlayerQuit(PlayerQuitEvent event) {
+        SORT_DEBOUNCE.remove(event.getPlayer().getUniqueId());
+        LAST_SORT_EVENTS.remove(event.getPlayer().getUniqueId());
+    }
+
+    @EventHandler
+    private static void onInventoryClicked(InventoryClickEvent event) {
+        var inventory = event.getInventory();
+        var clickedInventory = event.getClickedInventory();
+        // We want them to click off inventory to sort.
+        if (clickedInventory != null) return;
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+        var uuid = player.getUniqueId();
+        var now = Instant.now();
+        var lastSort = SORT_DEBOUNCE.get(uuid);
+        if (lastSort.until(now, ChronoUnit.MILLIS) < SORT_DELAY) return;
+        var lastClick = LAST_SORT_EVENTS.get(uuid);
+        LAST_SORT_EVENTS.put(uuid, now);
+        if (lastClick.until(now, ChronoUnit.MILLIS) > SORT_THRESHOLD) {
+            return;
+        }
+
+        SORT_DEBOUNCE.put(uuid, now);
+        sortInventory(inventory, player);
+    }
+
+    private static void sortInventory(Inventory inventory, Player player) {
+        if (inventory.getType() == InventoryType.CHEST) {
+            sortInventory(inventory);
+            return;
+        }
+
+        // Some items, we don't want to sort inside of them (think crafting tables, etc.) in this case, sort player's inv.
+        sortInventory(player.getInventory());
+    }
+
+    private static void sortInventory(Inventory inventory) {
+        var contents = inventory.getStorageContents();
+        var sorted = Arrays.stream(contents)
+                .sorted(STACK_COMPARATOR)
+                .toArray(ItemStack[]::new);
+        mergeStacks(sorted);
+        inventory.setStorageContents(sorted);
+    }
+
+    private static void mergeStacks(ItemStack[] stacks) {
+        ItemStack last = stacks[0];
+        Queue<Integer> emptySlots = new LinkedList<>();
+
+        for (int i = 1; i < stacks.length; i++) {
+            var current = stacks[i];
+            if (current == null) break;
+            if (!current.isSimilar(last)) {
+                last = current;
+            }
+
+            if (last != current) {
+                var wantAdd = last.getMaxStackSize() - last.getAmount();
+                var toAdd = Math.min(wantAdd, current.getAmount());
+                last.add(toAdd);
+                current.subtract(toAdd);
+
+                if (current.getAmount() <= 0) {
+                    stacks[i] = null;
+                    emptySlots.add(i);
+                    continue;
+                } else {
+                    last = current;
                 }
-                boolean shouldSort = !PLAYER_SHOULD_SORT.get(p);
-                TweaksMod.CONFIG.setDataInt(p, "bShouldSort", shouldSort ? 1 : 0);
-                PLAYER_SHOULD_SORT.put(p, shouldSort);
-                source.sendFeedback(Text.of(String.format("%s sorting!", shouldSort ? "Enabled" : "Disabled")), false);
-                return 1;
-            }));
-        }));
-    }
+            }
 
-    private static int getRarityValue(ItemStack s) {
-        if (s.isEmpty()) return 0;
-        Rarity r = s.getRarity();
-        return switch (r) {
-            case COMMON -> 1;
-            case UNCOMMON -> 2;
-            case RARE -> 3;
-            case EPIC -> 4;
-        };
-    }
-
-    private static int getGroupValue(ItemStack item) {
-        ItemGroup i = item.getItem().getGroup();
-        if (i == null) return 0;
-        if (i.equals(ItemGroup.TOOLS)) return 6;
-        else if (i.equals(ItemGroup.COMBAT)) return 5;
-        else if (i.equals(ItemGroup.FOOD)) return 4;
-        else if (i.equals(ItemGroup.BUILDING_BLOCKS)) return 3;
-        else if (i.equals(ItemGroup.MATERIALS)) return 2;
-        else return 1;
-    }
-
-    public static void sortInventory(ScreenHandler handler) {
-        int size = handler.slots.size();
-        int starting = 0;
-        Inventory firstInventory = null;
-        for (int i = 0; i < size; ++i) {
-            Slot s = handler.slots.get(i);
-            if (s.inventory.size() > 10) { // Bigger than crafting table
-                firstInventory = s.inventory;
-                starting = i;
-                size = firstInventory.size();
-                break;
+            if (!emptySlots.isEmpty()) {
+                var toMove = emptySlots.remove();
+                stacks[toMove] = current;
+                stacks[i] = null;
+                emptySlots.add(i);
             }
         }
-
-        if (firstInventory == null) return;
-        if (size == 41) {
-            size = 27;
-        }
-        if (handler instanceof PlayerScreenHandler) {
-            starting += 4;
-        }
-        List<ItemStack> toSort = new ArrayList<>();
-        for (int i = 0; i < size; ++i) {
-            if (!handler.getSlot(starting+i).getStack().isEmpty())
-                toSort.add(firstInventory.removeStack(handler.getSlot(starting+i).getIndex()));
-        }
-        toSort.sort(STACK_COMPARATOR);
-        int sortSize = toSort.size();
-        for (int i = 0; i < size; ++i) {
-            handler.getSlot(starting+i).insertStack(i < sortSize ? toSort.get(sortSize-i-1) : ItemStack.EMPTY);
-        }
-        handler.syncState();
-        handler.updateToClient();
     }
 
-    private static void onPlayerJoined(ServerPlayNetworkHandler handler, PacketSender sender, MinecraftServer server) {
-        PlayerEntity p = handler.player;
-        PLAYER_CLICKS.put(p, System.currentTimeMillis());
-        boolean shouldSort = TweaksMod.CONFIG.getDataInt(handler.player, "bShouldSort") == 1;
-        PLAYER_SHOULD_SORT.put(p, shouldSort);
-    }
 
-    private static void onPlayerLeft(ServerPlayNetworkHandler handler, MinecraftServer server) {
-        PlayerEntity p = handler.player;
-        PLAYER_CLICKS.remove(p);
-        PLAYER_SHOULD_SORT.remove(p);
+    private static int getGroupValue(ItemStack item) {
+        if (item == null) return Integer.MAX_VALUE;
+        var type = item.getType();
+
+        ///  In order:
+        /// Blocks, Decorational, Food, Tools, Weapons, Armor
+        if (item.hasData(DataComponentTypes.EQUIPPABLE)) return 6000;
+        if (item.hasData(DataComponentTypes.WEAPON)) return 5000;
+        if (item.hasData(DataComponentTypes.TOOL)) return 4000;
+        if (type.isEdible() || type == Material.CAKE) return 3000;
+        if (type.isBlock()) {
+            if (Tag.BASE_STONE_OVERWORLD.isTagged(type)) return 200;
+            if (Tag.CAMPFIRES.isTagged(type)) return 494;
+            if (Tag.LANTERNS.isTagged(type)) return 495;
+            if (Tag.STAIRS.isTagged(type)) return 496;
+            if (Tag.SLABS.isTagged(type)) return 497;
+            if (Tag.FENCES.isTagged(type)) return 498;
+            if (Tag.FENCE_GATES.isTagged(type)) return 498;
+            if (Tag.WALLS.isTagged(type)) return 499;
+            if (Tag.WOOL_CARPETS.isTagged(type)) return 500;
+            if (Tag.DOORS.isTagged(type)) return 501;
+            if (Tag.BARS.isTagged(type)) return 502;
+            return 250;
+        }
+
+        return Integer.MAX_VALUE;
     }
 }

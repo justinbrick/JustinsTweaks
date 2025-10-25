@@ -1,21 +1,19 @@
 package directory.justin.minecraft.tweaks;
 
 import directory.justin.minecraft.tweaks.util.SortUtility;
-import directory.justin.minecraft.tweaks.util.TweaksDatabase;
-import net.fabricmc.api.ModInitializer;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class TweaksMod implements ModInitializer
+public class TweaksMod extends JavaPlugin
 {
     public static final Logger LOGGER = LoggerFactory.getLogger(TweaksMod.class);
-    public static final TweaksDatabase CONFIG = new TweaksDatabase("jTweaksPlayerData.db");
-    private static SortUtility sortUtility;
+    private static final SortUtility sortUtility = new SortUtility();
     @Override
-    public void onInitialize() {
-        String version = getClass().getPackage().getImplementationVersion();
-        LOGGER.info(String.format("Justin's Tweaks, Version %s", version == null ? "indev" : version));
-        CONFIG.createPropertyInt("bShouldSort", 0);
-        sortUtility = new SortUtility();
+    public void onEnable() {
+        var version = getClass().getPackage().getImplementationVersion();
+        LOGGER.info("Justin's Tweaks, Version {}", version == null ? "indev" : version);
+        Bukkit.getPluginManager().registerEvents(sortUtility, this);
     }
 }

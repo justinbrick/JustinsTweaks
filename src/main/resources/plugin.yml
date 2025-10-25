@@ -1,0 +1,7 @@
+name: JustinsTweaks
+version: 2.0.0
+main: directory.justin.minecraft.tweaks.TweaksMod
+description: A set of tweaks for servers
+author: Justin
+website: https://justin.directory
+api-version: 1.21.10
