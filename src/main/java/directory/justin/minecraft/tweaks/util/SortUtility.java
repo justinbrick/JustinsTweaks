@@ -32,7 +32,7 @@ public class SortUtility implements Listener {
     private static final HashMap<UUID, Instant> LAST_SORT_EVENTS = new HashMap<>();
     private static final Logger LOGGER = LoggerFactory.getLogger(SortUtility.class);
     private static final PlainTextComponentSerializer PLAIN_TEXT_COMPONENT_SERIALIZER = PlainTextComponentSerializer.plainText();
-    private final static Comparator<ItemStack> STACK_COMPARATOR = Comparator.comparing(SortUtility::getGroupValue)
+    private static final Comparator<ItemStack> STACK_COMPARATOR = Comparator.comparing(SortUtility::getGroupValue)
             .thenComparing(stack -> Optional.ofNullable(stack)
                     .map(s -> s.getData(DataComponentTypes.ITEM_NAME))
                     .map(PLAIN_TEXT_COMPONENT_SERIALIZER::serialize)
@@ -43,6 +43,7 @@ public class SortUtility implements Listener {
                     .orElse(0)
             )
             .thenComparing(stack -> Optional.ofNullable(stack).map(ItemStack::getAmount).orElse(-1));
+
 
 
     @EventHandler
@@ -139,6 +140,50 @@ public class SortUtility implements Listener {
     }
 
 
+    /// the base ranking of blocks, where ranking starts.
+    private static final int BASE_BLOCK_RANKING = 250;
+    /// the tiering of ranks for blocks
+    private static final int BASE_BLOCK_INCREMENT = 10;
+    /// a specified rank objects breakable by pickaxes
+    private static final int RANKING_PICKAXE;
+    /// a specified rank objects breakable by axes
+    private static final int RANKING_AXE;
+    /// a specified rank objects breakable by shovels
+    private static final int RANKING_SHOVEL;
+    private static int getBlockRanking(int index) {
+        return BASE_BLOCK_RANKING + index * BASE_BLOCK_INCREMENT;
+    }
+
+    /// If an item count as a block, this list sequentially determines which ranking it has.
+    private static final ArrayList<Tag<Material>> BLOCK_TAG_RANKINGS  = new ArrayList<>() {{
+        ensureCapacity(50);
+        add(Tag.BASE_STONE_OVERWORLD);
+        add(Tag.BASE_STONE_NETHER);
+        add(Tag.LOGS);
+        add(Tag.CROPS);
+        add(Tag.DIRT);
+        add(Tag.WOOL);
+        add(Tag.BEDS);
+        add(Tag.CAMPFIRES);
+        add(Tag.LANTERNS);
+        add(Tag.CLIMBABLE);
+        add(Tag.STAIRS);
+        add(Tag.SLABS);
+        add(Tag.WOOL_CARPETS);
+        add(Tag.FENCES);
+        add(Tag.FENCE_GATES);
+        add(Tag.ALL_SIGNS);
+        add(Tag.WALLS);
+        add(Tag.DOORS);
+        add(Tag.BARS);
+    }};
+
+    static {
+        RANKING_PICKAXE = getBlockRanking(BLOCK_TAG_RANKINGS.indexOf(Tag.BASE_STONE_NETHER)) + BASE_BLOCK_INCREMENT / 2;
+        RANKING_AXE = getBlockRanking(BLOCK_TAG_RANKINGS.indexOf(Tag.LOGS)) + BASE_BLOCK_INCREMENT / 2;
+        RANKING_SHOVEL = getBlockRanking(BLOCK_TAG_RANKINGS.indexOf(Tag.DIRT)) + BASE_BLOCK_INCREMENT / 2;
+    }
+    /// Given an item stack, returns a value representing the "sort order" of an item, depending on what tags it has.
     private static int getGroupValue(ItemStack item) {
         if (item == null) return Integer.MAX_VALUE;
         var type = item.getType();
@@ -150,18 +195,14 @@ public class SortUtility implements Listener {
         if (item.hasData(DataComponentTypes.TOOL)) return 4000;
         if (type.isEdible() || type == Material.CAKE) return 3000;
         if (type.isBlock()) {
-            if (Tag.BASE_STONE_OVERWORLD.isTagged(type)) return 200;
-            if (Tag.CAMPFIRES.isTagged(type)) return 494;
-            if (Tag.LANTERNS.isTagged(type)) return 495;
-            if (Tag.STAIRS.isTagged(type)) return 496;
-            if (Tag.SLABS.isTagged(type)) return 497;
-            if (Tag.FENCES.isTagged(type)) return 498;
-            if (Tag.FENCE_GATES.isTagged(type)) return 498;
-            if (Tag.WALLS.isTagged(type)) return 499;
-            if (Tag.WOOL_CARPETS.isTagged(type)) return 500;
-            if (Tag.DOORS.isTagged(type)) return 501;
-            if (Tag.BARS.isTagged(type)) return 502;
-            return 250;
+            for (var i = 0; i < BLOCK_TAG_RANKINGS.size(); i++) {
+                if (BLOCK_TAG_RANKINGS.get(i).isTagged(type)) return BASE_BLOCK_RANKING + i * BASE_BLOCK_INCREMENT;
+            }
+            if (Tag.MINEABLE_PICKAXE.isTagged(type)) return RANKING_PICKAXE;
+            if (Tag.MINEABLE_AXE.isTagged(type)) return RANKING_AXE;
+            if (Tag.MINEABLE_SHOVEL.isTagged(type)) return RANKING_SHOVEL;
+            // If none match, just place at the end.
+            return BASE_BLOCK_RANKING + 1 + BLOCK_TAG_RANKINGS.size() * BASE_BLOCK_INCREMENT;
         }
 
         return Integer.MAX_VALUE;
