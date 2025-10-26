@@ -1,8 +1,14 @@
 package directory.justin.minecraft.tweaks.util;
 
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.context.CommandContext;
+import directory.justin.minecraft.tweaks.TweaksMod;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Tag;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -12,9 +18,12 @@ import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.*;
+import org.bukkit.persistence.PersistentDataType;
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.naming.NameParser;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -22,6 +31,39 @@ import java.util.stream.Stream;
 
 @SuppressWarnings("UnstableApiUsage")
 public class SortUtility implements Listener {
+
+    // Command registration
+    private static final NamespacedKey KEY_SHOULD_SORT = new NamespacedKey("jt", "should_sort");
+    static {
+        TweaksMod.BASE_COMMAND.then(Commands.literal("sort")
+                .then(Commands.literal("enable").
+                        executes(c -> disableSort(c, true)))
+                .then(Commands.literal("disable")
+                        .executes(c -> disableSort(c, false))));
+    }
+
+    private static int disableSort(CommandContext<CommandSourceStack> context, boolean enabled) {
+        var source = context.getSource();
+        var sender = source.getSender();
+        var executor = source.getExecutor();
+        if (!(executor instanceof Player p)) {
+            sender.sendPlainMessage("Only players can use this command.");
+            return Command.SINGLE_SUCCESS;
+        }
+
+        var pdc = p.getPersistentDataContainer();
+        pdc.set(KEY_SHOULD_SORT, PersistentDataType.BOOLEAN, enabled);
+        p.sendPlainMessage(String.format("Sorting enabled: %b", enabled));
+
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private static boolean shouldSort(Player player) {
+       var shouldSort = player.getPersistentDataContainer().get(KEY_SHOULD_SORT, PersistentDataType.BOOLEAN);
+       return shouldSort == null || shouldSort;
+    }
+
+    // Actual sorting logic
     private static final int SORT_DELAY = 1000;
     private static final int SORT_THRESHOLD = 250;
     /// a mapping of the player UUID, and the last time a player had sorted.
@@ -65,6 +107,8 @@ public class SortUtility implements Listener {
         // We want them to click off inventory to sort.
         if (clickedInventory != null) return;
         if (!(event.getWhoClicked() instanceof Player player)) return;
+        // If player has disabled sort, we don't care.
+        if (!shouldSort(player)) return;
         var uuid = player.getUniqueId();
         var now = Instant.now();
         var lastSort = SORT_DEBOUNCE.get(uuid);
@@ -76,11 +120,11 @@ public class SortUtility implements Listener {
         }
 
         SORT_DEBOUNCE.put(uuid, now);
-        LOGGER.info("Sorting inventory, {}", inventory);
+        LOGGER.trace("Sorting inventory for {}, {}", player.getName(), inventory);
         sortInventory(inventory, player);
     }
 
-    private static void sortInventory(Inventory inventory, Player player) {
+    private static void sortInventory(@NotNull Inventory inventory, @NotNull Player player) {
         if (inventory.getType() == InventoryType.CHEST) {
             sortInventory(inventory);
             return;
@@ -90,7 +134,7 @@ public class SortUtility implements Listener {
         sortInventory(player.getInventory());
     }
 
-    private static void sortInventory(Inventory inventory) {
+    private static void sortInventory(@NotNull Inventory inventory) {
         var contents = inventory.getStorageContents();
         var toSort = Arrays.stream(contents);
         toSort = inventory instanceof PlayerInventory ? toSort.skip(9) : toSort;
