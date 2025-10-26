@@ -11,16 +11,14 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.inventory.CreativeCategory;
-import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.ItemType;
+import org.bukkit.inventory.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.stream.Stream;
 
 @SuppressWarnings("UnstableApiUsage")
 public class SortUtility implements Listener {
@@ -77,6 +75,7 @@ public class SortUtility implements Listener {
         }
 
         SORT_DEBOUNCE.put(uuid, now);
+        LOGGER.info("Sorting inventory, {}", inventory);
         sortInventory(inventory, player);
     }
 
@@ -92,10 +91,15 @@ public class SortUtility implements Listener {
 
     private static void sortInventory(Inventory inventory) {
         var contents = inventory.getStorageContents();
-        var sorted = Arrays.stream(contents)
+        var toSort = Arrays.stream(contents);
+        toSort = inventory instanceof PlayerInventory ? toSort.skip(9) : toSort;
+        var sorted = toSort
                 .sorted(STACK_COMPARATOR)
                 .toArray(ItemStack[]::new);
         mergeStacks(sorted);
+        sorted = inventory instanceof PlayerInventory
+                ? Stream.concat(Arrays.stream(contents).limit(9), Arrays.stream(sorted)).toArray(ItemStack[]::new)
+                : sorted;
         inventory.setStorageContents(sorted);
     }
 
