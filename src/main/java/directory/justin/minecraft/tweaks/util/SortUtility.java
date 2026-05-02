@@ -8,8 +8,6 @@ import directory.justin.minecraft.tweaks.TweaksMod;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.datacomponent.DataComponentTypes;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Stream;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
@@ -20,7 +18,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.*;
 import org.jetbrains.annotations.NotNull;
@@ -33,14 +30,7 @@ public class SortUtility implements Listener {
   // Command registration
   private static final NamespacedKey KEY_SHOULD_SORT = new NamespacedKey("jt", "should_sort");
   // Actual sorting logic
-  private static final int SORT_DELAY = 1000;
-  private static final int SORT_THRESHOLD = 250;
-  /// a mapping of the player UUID, and the last time a player had sorted.
-  /// typically used to prevent over-sorting
-  private static final HashMap<UUID, Instant> SORT_DEBOUNCE = new HashMap<>();
-  /// a mapping of the player UUID, and the last time a sort request had been triggered.
-  /// used to determine when to sort.
-  private static final HashMap<UUID, Instant> LAST_SORT_EVENTS = new HashMap<>();
+  private static final PlayerDelayDebounce DEBOUNCE = new PlayerDelayDebounce(1000, 250);
   private static final Logger LOGGER = LoggerFactory.getLogger(SortUtility.class);
   private static final PlainTextComponentSerializer PLAIN_TEXT_COMPONENT_SERIALIZER =
       PlainTextComponentSerializer.plainText();
@@ -69,6 +59,7 @@ public class SortUtility implements Listener {
           Tag.CLIMBABLE,
           Tag.STAIRS,
           Tag.SLABS,
+          Tag.TRAPDOORS,
           Tag.WOOL_CARPETS,
           Tag.FENCES,
           Tag.FENCE_GATES,
@@ -128,66 +119,52 @@ public class SortUtility implements Listener {
   }
 
   @EventHandler
-  private static void onPlayerJoined(PlayerJoinEvent event) {
-    SORT_DEBOUNCE.put(event.getPlayer().getUniqueId(), Instant.now());
-    LAST_SORT_EVENTS.put(event.getPlayer().getUniqueId(), Instant.now());
-  }
-
-  @EventHandler
   private static void onPlayerQuit(PlayerQuitEvent event) {
-    SORT_DEBOUNCE.remove(event.getPlayer().getUniqueId());
-    LAST_SORT_EVENTS.remove(event.getPlayer().getUniqueId());
+    DEBOUNCE.removePlayer(event.getPlayer());
   }
 
   @EventHandler
   private static void onInventoryClicked(InventoryClickEvent event) {
-    var inventory = event.getInventory();
-    var clickedInventory = event.getClickedInventory();
-    // We want them to click off inventory to sort.
-    if (clickedInventory != null) return;
+    if (!event.isLeftClick() || event.isShiftClick()) return;
+    if (event.getClickedInventory() != null) return;
     if (!(event.getWhoClicked() instanceof Player player)) return;
-    // If player has disabled sort, we don't care.
     if (!shouldSort(player)) return;
-    var uuid = player.getUniqueId();
-    var now = Instant.now();
-    var lastSort = SORT_DEBOUNCE.get(uuid);
-    if (lastSort.until(now, ChronoUnit.MILLIS) < SORT_DELAY) return;
-    var lastClick = LAST_SORT_EVENTS.get(uuid);
-    LAST_SORT_EVENTS.put(uuid, now);
-    if (lastClick.until(now, ChronoUnit.MILLIS) > SORT_THRESHOLD) {
+    if (DEBOUNCE.isDebounced(player)) return;
+
+    var inventory = event.getInventory();
+    if (!DEBOUNCE.isInThreshold(player)) {
+      DEBOUNCE.updateThreshold(player);
       return;
     }
+    DEBOUNCE.updateDebounce(player);
 
-    SORT_DEBOUNCE.put(uuid, now);
     LOGGER.trace("Sorting inventory for {}, {}", player.getName(), inventory);
     sortInventory(inventory, player);
   }
 
   private static void sortInventory(@NotNull Inventory inventory, @NotNull Player player) {
-    switch (inventory.getType()) {
-      case CHEST:
-      case BARREL:
-      case SHULKER_BOX:
-        sortInventory(inventory);
-        break;
-      default:
-        sortInventory(player.getInventory());
-        break;
-    }
+    if (ChestUtility.isValidInventory(inventory))
+      sortInventory(inventory);
+    else
+      sortInventory(player.getInventory());
   }
 
   private static void sortInventory(@NotNull Inventory inventory) {
-    var contents = inventory.getStorageContents();
-    var toSort = Arrays.stream(contents);
-    toSort = inventory instanceof PlayerInventory ? toSort.skip(9) : toSort;
+    var toSort =
+        inventory instanceof PlayerInventory p
+            ? InventoryUtility.getInventoryNoHotbar(p)
+            : Arrays.stream(inventory.getStorageContents());
     var sorted = toSort.sorted(STACK_COMPARATOR).toArray(ItemStack[]::new);
     mergeStacks(sorted);
-    sorted =
-        inventory instanceof PlayerInventory
-            ? Stream.concat(Arrays.stream(contents).limit(9), Arrays.stream(sorted))
-                .toArray(ItemStack[]::new)
-            : sorted;
-    inventory.setStorageContents(sorted);
+
+    if (inventory instanceof PlayerInventory p) {
+      try {
+        InventoryUtility.addToInventoryNoHotbar(p, Arrays.stream(sorted));
+      } catch (Exception e) {
+        LOGGER.error("Error while sorting inventory", e);
+      }
+    } else
+      inventory.setStorageContents(sorted);
   }
 
   private static void mergeStacks(ItemStack[] stacks) {
@@ -230,7 +207,7 @@ public class SortUtility implements Listener {
   }
 
   /// Given an item stack, returns a value representing the "sort order" of an item, depending on
-  // what tags it has.
+  /// what tags it has.
   private static int getGroupValue(ItemStack item) {
     if (item == null) return Integer.MAX_VALUE;
     var type = item.getType();
